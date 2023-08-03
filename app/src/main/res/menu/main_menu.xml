@@ -1,16 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:id="@+id/menu_stop"
-        android:title="Stop"
-        android:orderInCategory="100"
-        app:showAsAction="never" />
-    <item android:id="@+id/menu_scan"
-        android:title="Scan"
-        android:orderInCategory="101"
-        app:showAsAction="never" />
-    <item android:id="@+id/menu_refresh"
-        android:title="Refresh"
-        android:orderInCategory="102"
-        app:showAsAction="never" />
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+    <item android:id="@+id/menu_ble"
+        android:title="BLE"
+        android:orderInCategory="100">
+        <menu>
+            <item android:id="@+id/menu_stop_ble"
+                android:title="Stop"
+                android:orderInCategory="101" />
+            <item android:id="@+id/menu_scan_ble"
+                android:title="Scan"
+                android:orderInCategory="102" />
+            <item android:id="@+id/menu_refresh"
+                android:title="Refresh"
+                android:orderInCategory="103" />
+        </menu>
+    </item>
+    <item android:id="@+id/menu_ant"
+        android:title="ANT+"
+        android:orderInCategory="200">
+        <menu>
+            <item android:id="@+id/menu_stop_ant"
+                android:title="Stop"
+                android:orderInCategory="201" />
+            <item android:id="@+id/menu_scan_ant"
+                android:title="Scan"
+                android:orderInCategory="202" />
+        </menu>
+    </item>
+    <item android:id="@+id/action_csv"
+        android:icon="@drawable/baseline_save_24"
+        android:title="CSV"
+        android:orderInCategory="300"
+        app:showAsAction="always"/>
 </menu>

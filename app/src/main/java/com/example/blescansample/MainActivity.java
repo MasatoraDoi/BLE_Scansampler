@@ -19,6 +19,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.ParcelUuid;
 import android.util.Log;
+import android.util.Pair;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -32,9 +33,23 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.stream.Collectors;
 
 public class MainActivity extends AppCompatActivity {
     private BluetoothAdapter bluetoothAdapter;
@@ -45,10 +60,14 @@ public class MainActivity extends AppCompatActivity {
     private List<ScanFilter> scanFilters;
     private Context context;
     private boolean mScanning;
+    private boolean isRecording;
     private static final String TAG = MainActivity.class.getSimpleName();
     private static final int PERMISSION_REQUEST_CODE = 1;
     private Handler handler = new Handler();
     private static final long SCAN_PERIOD = 10000;
+
+    private ConcurrentHashMap<String, Float> sensorDataMap = new ConcurrentHashMap<>();
+    private Timer timer;
 
     private static final UUID SERVICE_UUID = UUID.fromString("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
     private static final UUID CHARACTERISTIC_UUID = UUID.fromString("beb5483e-36e1-4688-b7f5-ea07361b26a8");
@@ -69,6 +88,9 @@ public class MainActivity extends AppCompatActivity {
         scanSettings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_BALANCED).build();
         scanFilters = new ArrayList<>();
 
+        isRecording = false;
+        timer = new Timer();
+
         // Add a filter
         UUID[] serviceUuids = {SERVICE_UUID};
         ScanFilter scanFilter = new ScanFilter.Builder()
@@ -87,13 +109,14 @@ public class MainActivity extends AppCompatActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.main_menu, menu);
+
         if (!mScanning) {
-            menu.findItem(R.id.menu_stop).setVisible(false);
-            menu.findItem(R.id.menu_scan).setVisible(true);
+            menu.findItem(R.id.menu_stop_ble).setVisible(false);
+            menu.findItem(R.id.menu_scan_ble).setVisible(true);
             menu.findItem(R.id.menu_refresh).setActionView(null);
         } else {
-            menu.findItem(R.id.menu_stop).setVisible(true);
-            menu.findItem(R.id.menu_scan).setVisible(false);
+            menu.findItem(R.id.menu_stop_ble).setVisible(true);
+            menu.findItem(R.id.menu_scan_ble).setVisible(false);
             menu.findItem(R.id.menu_refresh).setActionView(R.layout.actionbar_indeterminate_progress);
         }
         return true;
@@ -102,11 +125,20 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
-            case R.id.menu_scan:
+            case R.id.menu_scan_ble:
                 scanLeDevice(true);
                 break;
-            case R.id.menu_stop:
+            case R.id.menu_stop_ble:
                 scanLeDevice(false);
+                break;
+            case R.id.action_csv:
+                if (!isRecording) {
+                    // レコーディングを開始
+                    startRecording();
+                } else {
+                    // レコーディングを終了
+                    stopRecording();
+                }
                 break;
         }
         return true;
@@ -222,6 +254,7 @@ public class MainActivity extends AppCompatActivity {
                 Log.i(TAG, "Connected to GATT server.");
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH)
                         == PackageManager.PERMISSION_GRANTED) {
+                    //gatt.requestMtu(40);
                     gatt.discoverServices(); // パーミッションが許可されている場合のみサービスの検出を試みます
                 }
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -256,28 +289,105 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+
         @Override
         public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-            // get value as byte array
-            byte[] dataBytes = characteristic.getValue();
+            super.onCharacteristicChanged(gatt, characteristic);
 
-            // create ByteBuffer for conversion
-            ByteBuffer bb = ByteBuffer.wrap(dataBytes);
+            byte[] data = characteristic.getValue();
+            Log.d("BLE", "Received data length: " + data.length);
 
-            // set the ByteBuffer to use little endian
-            bb.order(ByteOrder.LITTLE_ENDIAN);
+            float[] dataAsFloats = MainActivity.this.convertBytesToFloats(data);
 
-            // get the float value from the ByteBuffer
-            float data_sample = bb.getFloat();
+            if(dataAsFloats != null && dataAsFloats.length > 0) {
+                int seq = (int)dataAsFloats[0];  // First float is sequence number
+                float[] actualData = Arrays.copyOfRange(dataAsFloats, 1, dataAsFloats.length);  // Ignore first float
+                Log.d("BLE", "Actual data length: " + actualData.length);
 
-            runOnUiThread(() -> {
-                TextView textView = findViewById(R.id.text_view);
-                textView.setText(String.valueOf(data_sample));
-            });
+                MainActivity.this.updateTextViews(seq, actualData);  // Call the method of the outer class
+            } else {
+                Log.d("BLE", "Failed to convert data");
+            }
         }
-
     };
 
+    // バイトを解析するためのメソッド
+    private float[] convertBytesToFloats(byte[] data) {
+        if (data == null || data.length % 4 != 0) return null;
+
+        float[] floats = new float[data.length / 4];
+        for (int i = 0; i < floats.length; i++) {
+            int value = 0;
+            for (int j = 0; j < 4; j++) {
+                value |= (data[i * 4 + j] & 0xFF) << (j * 8);
+            }
+            floats[i] = Float.intBitsToFloat(value);
+        }
+        return floats;
+    }
+
+    // データを各TextViewに反映するメソッド
+    private void updateTextViews(int sequenceNumber, float[] data) {
+        // UIスレッド外でsensorDataMapを更新
+        for (int i = 0; i < data.length; i++) {
+            sensorDataMap.put(String.valueOf(sequenceNumber * 4 + i + 1), data[i]);
+        }
+        runOnUiThread(() -> {
+            for (int i = 0; i < data.length; i++) {
+                TextView textView = findViewById(getResources().getIdentifier("text_view" + (sequenceNumber * 4 + i + 1), "id", getPackageName()));
+                if (textView != null && i < data.length) {
+                    textView.setText(String.valueOf(data[i]));
+                }
+            }
+        });
+    }
+
+    private void startRecording() {
+        Toast.makeText(MainActivity.this, "Recording start", Toast.LENGTH_SHORT).show();
+        // レコーディング状態をtrueに
+        isRecording = true;
+
+        // ファイル名を現在の日時から生成
+        String filename = new SimpleDateFormat("yyyyMMddHHmmss", Locale.getDefault()).format(new Date()) + ".csv";
+
+        // 保存するファイルのパスを指定
+        File outputFile = new File(getExternalFilesDir(null), filename);
+
+        // タイマータスクを作成
+        TimerTask timerTask = new TimerTask() {
+            @Override
+            public void run() {
+                try (FileWriter writer = new FileWriter(outputFile, true)) {
+                    // データ取得時間をHHmmssSSS形式にフォーマット
+                    String formattedTime = new SimpleDateFormat("HHmmssSSS", Locale.getDefault()).format(new Date());
+                    // データを文字列に変換
+                    String dataString = sensorDataMap.entrySet().stream()
+                            .map(entry -> entry.getKey() + ":" + entry.getValue())
+                            .collect(Collectors.joining(","));
+                    // ファイルに書き込み
+                    writer.write(formattedTime + "," + dataString + "\n");
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+
+
+        // タイマーを開始（0.5秒ごとにタスクを実行）
+        timer.scheduleAtFixedRate(timerTask, 0, 500);
+    }
+
+    private void stopRecording() {
+        Toast.makeText(MainActivity.this, "Recording stop", Toast.LENGTH_SHORT).show();
+        // レコーディング状態をfalseに
+        isRecording = false;
+
+        // タイマーを停止
+        timer.cancel();
+        timer.purge();
+
+        timer = new Timer();  // 新たなTimerオブジェクトを作成
+    }
     @Override
     protected void onDestroy() {
         super.onDestroy();
